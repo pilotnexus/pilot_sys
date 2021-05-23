@@ -70,6 +70,7 @@ pub trait MemVar: Sync {
 pub trait VarProps<T> {
     fn get(&self) -> T;
     fn set(&self, value: T);
+    fn subscribe(&self, value: SubscribeMode);
 }
 
 pub trait VarChange {
@@ -302,5 +303,9 @@ impl VarProps<bool> for Var<bool> {
               _ => ()
             }
         }
+    }
+
+    fn subscribe(&self, value: SubscribeMode) {
+      self.subscribed.set(value);
     }
 }

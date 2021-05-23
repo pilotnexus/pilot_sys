@@ -116,6 +116,10 @@ macro_rules! var_impl {
                 }
             }
         }
+
+        fn subscribe(&self, value: SubscribeMode) {
+          self.subscribed.set(value);
+        }
     }
   }
 }
