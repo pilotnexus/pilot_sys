@@ -7,7 +7,7 @@ use core::{
 };
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum SubscribeMode {
+pub enum SubscribeMode {
   Off,
   Sticky,
   Current
