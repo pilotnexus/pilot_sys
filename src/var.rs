@@ -121,6 +121,7 @@ pub struct WaitChange<'a, V> {
     event: Event,
 }
 
+
 impl<V> Future for WaitChange<'_, V>
 where
     V: VarChange,
@@ -128,6 +129,7 @@ where
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Self::Output> {
+        crate::poll::poll_called();
         let &Self { var, event } = self.into_ref().get_ref();
         let finished = match event {
             Event::Pos => var.pos(),

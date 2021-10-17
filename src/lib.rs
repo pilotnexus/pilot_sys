@@ -10,5 +10,8 @@ pub mod async_util;
 #[macro_use]
 pub mod print;
 
+#[macro_use]
+pub mod poll;
+
 // re-export futures
 pub use futures;

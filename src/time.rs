@@ -1,6 +1,6 @@
 use core::task::Poll;
 use futures::future;
-use crate::sync::SyncCell;
+use crate::{poll::poll_called, sync::SyncCell};
 
 /// Number of microseconds in a second.
 pub const SECOND: u64 = 1_000_000;
@@ -23,6 +23,7 @@ pub fn set_system_time(us: u64) {
 /// Waits until the system time passes the given timestamp in microseconds.
 pub async fn wait_until(time: u64) {
     future::poll_fn(|_| {
+        poll_called();
         if current_time() >= time {
             Poll::Ready(())
         } else {
