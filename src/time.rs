@@ -38,6 +38,22 @@ pub async fn wait_us(duration_us: u64) {
     wait_until(current_time() + duration_us).await
 }
 
+/// Asynchronously waits for a given duration.
+/// 
+/// # Arguments
+/// 
+/// * `duration` - The duration to wait
+/// 
+/// # Example
+/// 
+/// ```
+/// // Waits for a second
+/// wait(Duration::from_secs(1)).await;
+/// ```
+pub async fn wait(duration: core::time::Duration) {
+    wait_until(current_time() + duration.as_micros() as u64).await
+}
+
 /// Waits until the next call to `run`.
 pub async fn wait_next_cycle() {
     wait_us(1).await
