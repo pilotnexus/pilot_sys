@@ -1,6 +1,6 @@
 [package]
 name = "pilot_sys"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Daniel Amesberger <daniel.amesberger@amescon.com>"]
 license = "ISC"
 edition = "2021"

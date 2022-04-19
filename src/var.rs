@@ -6,10 +6,17 @@ use core::{
     task::{Context, Poll},
 };
 
+/// SubscribeMode defines the subscription status of a variable
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SubscribeMode {
+  /// Do not subscribe to value changes
   Off,
+  /// Subscibe to value changes, the first change is stored and returned as soon as the change is read
+  /// Useful if you want to detect a fast change (e.g. change of a flag)
+  /// This also registers a zero-length pulse (setting the value to 1 and immediately to 0 again)
   Sticky,
+  /// Subscribe to value changes, the latest change is returned (might skip fast changes)
+  /// Useful if you want to read the most current value even if they change faster than you can read them (e.g. analog inputs)
   Current
 }
 
@@ -34,6 +41,12 @@ pub trait TypeName {
     const TYPE_NAME: &'static str;
 }
 
+impl TypeName for u64 {
+    const TYPE_NAME: &'static str = "u64";
+}
+impl TypeName for i64 {
+    const TYPE_NAME: &'static str = "i64";
+}
 impl TypeName for u32 {
     const TYPE_NAME: &'static str = "u32";
 }
@@ -68,17 +81,38 @@ pub trait MemVar: Sync {
 }
 
 pub trait VarProps<T> {
+    /// gets the value of the variable
     fn get(&self) -> T;
+    /// sets the value of the variable
     fn set(&self, value: T);
+    /// subscribe or unsubscribe to variable changes
     fn subscribe(&self, value: SubscribeMode);
 }
 
-pub trait VarChange {
-    fn pos(&self) -> bool;
-    fn neg(&self) -> bool;
-    fn changed(&self) -> bool;
+pub trait NumVar<T> {
+    /// increments value by 1, safely wraps around
+    /// when overflow occurs 
+    fn inc (&self, add: T);
+    /// safely adds a value to the variable
+    /// returns true if successful, if an overflow would occur false is returned and the value is not added
+    fn add (&self, add: T) -> bool;
+    /// safely substracts a value from the variable
+    /// returns true if successful, if an overflow would occur false is returned and the value is not substracted
+    fn sub (&self, substract: T) -> bool;
+    /// sets minimum value to trigger a subscription change event
+    fn delta(&self, delta: T);
+}
 
-    fn wait_pos(&self) -> WaitChange<'_, Self>
+/// handles variable changes
+pub trait VarChange {
+    fn pos_flag(&self) -> bool;
+    fn neg_flag(&self) -> bool;
+    fn changed_flag(&self) -> bool;
+
+    /// returns a Future to await a positive value change
+    /// That means in case of a boolean value a change from `false` to `true`, or
+    /// in case of a numeric value a change to a higher value
+    fn pos(&self) -> WaitChange<'_, Self>
     where
         Self: Sized,
     {
@@ -88,7 +122,10 @@ pub trait VarChange {
         }
     }
 
-    fn wait_neg(&self) -> WaitChange<'_, Self>
+    /// returns a Future to await a negative value change
+    /// That means in case of a boolean value a change from `true` to `false`, or
+    /// in case of a numeric value a change to a lower value
+    fn neg(&self) -> WaitChange<'_, Self>
     where
         Self: Sized,
     {
@@ -98,7 +135,8 @@ pub trait VarChange {
         }
     }
 
-    fn wait_changed(&self) -> WaitChange<'_, Self>
+    /// returns a Future to await a value change
+    fn changed(&self) -> WaitChange<'_, Self>
     where
         Self: Sized,
     {
@@ -132,9 +170,9 @@ where
         crate::poll::poll_called();
         let &Self { var, event } = self.into_ref().get_ref();
         let finished = match event {
-            Event::Pos => var.pos(),
-            Event::Neg => var.neg(),
-            Event::Changed => var.pos() || var.neg(),
+            Event::Pos => var.pos_flag(),
+            Event::Neg => var.neg_flag(),
+            Event::Changed => var.pos_flag() || var.neg_flag(),
         };
         if finished {
             Poll::Ready(())
@@ -148,6 +186,7 @@ pub struct Var<T: Default> {
     value: SyncCell<T>,
     changed_value: SyncCell<T>,
     forced_value: SyncCell<T>,
+    min_delta: SyncCell<T>,
     forced: SyncCell<bool>,
     dirty: SyncCell<bool>,
     subscribed: SyncCell<SubscribeMode>,
@@ -156,15 +195,15 @@ pub struct Var<T: Default> {
 }
 
 impl<T: Default> VarChange for Var<T> {
-    fn pos(&self) -> bool {
+    fn pos_flag(&self) -> bool {
         self.pos.get()
     }
 
-    fn neg(&self) -> bool {
+    fn neg_flag(&self) -> bool {
         self.neg.get()
     }
 
-    fn changed(&self) -> bool {
+    fn changed_flag(&self) -> bool {
         self.pos.get() || self.neg.get()
     }
 }
@@ -189,11 +228,20 @@ impl Var<bool> {
             forced_value: SyncCell::new(false),
             changed_value: SyncCell::new(false),
             forced: SyncCell::new(false),
+            min_delta: SyncCell::new(true),
             subscribed: SyncCell::new(SubscribeMode::Off),
             dirty: SyncCell::new(false),
             pos: SyncCell::new(false),
             neg: SyncCell::new(false),
         }
+    }
+
+    /// toggles the boolean value
+    /// and returns new value
+    pub fn toggle(&self) -> bool {
+        let value = !self.get();
+        self.set(value);
+        value
     }
 }
 

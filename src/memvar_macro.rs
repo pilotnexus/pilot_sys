@@ -9,6 +9,7 @@ macro_rules! var_impl {
                 forced_value: SyncCell::new(0),
                 changed_value: SyncCell::new(0),
                 forced: SyncCell::new(false),
+                min_delta: SyncCell::new(1),
                 subscribed: SyncCell::new(SubscribeMode::Off),
                 dirty: SyncCell::new(false),
                 pos: SyncCell::new(false),
@@ -92,18 +93,28 @@ macro_rules! var_impl {
         }
     
         fn set(&self, value: $t) {
-            if value == self.value.get() {
-                self.pos.set(false);
-                self.neg.set(false);
-            } else {
-                if value > self.value.get() {
+            if match (self.value.get(), self.min_delta.get()) {
+                (v, _) if value == v => false, // unchanged
+                (v, d) if value >= v+d => {    // pos change
+                    self.value.set(value);
                     self.pos.set(true);
                     self.neg.set(false);
-                } else {
+                    true
+                },
+                (v, d) if value <= v-d => {   // neg change
+                    self.value.set(value);
                     self.pos.set(false);
                     self.neg.set(true);
+                    true
+                },
+                (_, _) => {
+                    self.value.set(value);
+                    self.pos.set(false);
+                    self.neg.set(false);
+                    false
                 }
-                self.value.set(value);
+            } {
+                // pos or neg change
                 match self.subscribed.get() {
                   SubscribeMode::Sticky => {
                     if !self.dirty.get() && self.changed_value.get() != value {
@@ -121,5 +132,33 @@ macro_rules! var_impl {
           self.subscribed.set(value);
         }
     }
+
+    impl NumVar<$t> for Var<$t> {
+        fn inc(&self, add: $t) {
+            match self.value.get().checked_add(add) {
+                Some(t) => self.value.set(t),
+                None => self.value.set(<$t>::MIN + (add - (<$t>::MAX-self.value.get())))
+            }
+        }
+
+        fn add(&self, add: $t) -> bool {
+            match self.value.get().checked_add(add) {
+                Some(t) => { self.value.set(t); true }
+                None => false
+            }
+        }
+
+        fn sub(&self, substract: $t) -> bool {
+            match self.value.get().checked_sub(substract) {
+                Some(t) => { self.value.set(t); true }
+                None => false
+            }
+        }
+
+        fn delta(&self, delta: $t) {
+            self.min_delta.set(delta);
+        }
+    }
+
   }
 }

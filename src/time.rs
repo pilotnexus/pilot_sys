@@ -33,7 +33,18 @@ pub async fn wait_until(time: u64) {
     .await
 }
 
-/// Waits the given number of microseconds.
+/// Asynchronously waits
+/// 
+/// # Arguments
+/// 
+/// * `duration` - The duration to wait in microseconds
+/// 
+/// # Example
+/// 
+/// ```
+/// // Waits for a second
+/// wait_us(1_000_000).await;
+/// ```
 pub async fn wait_us(duration_us: u64) {
     wait_until(current_time() + duration_us).await
 }

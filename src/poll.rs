@@ -1,7 +1,19 @@
 pub static mut POLL_CALLED: bool = false;
 
+/// async loop, avoids blocking and lets other async 
+/// tasks make progess.
+/// This macro requires double-curly braces.
+///
+/// # Example
+/// 
+/// ```
+/// loop_async! {{
+///   //your async task code
+/// }}
+/// ```
+
 #[macro_export]
-macro_rules! plc_loop {
+macro_rules! loop_async {
     {$body:block} => { 
         loop {
             $body
