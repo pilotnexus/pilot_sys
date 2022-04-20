@@ -1,6 +1,6 @@
 [package]
 name = "pilot_sys"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Daniel Amesberger <daniel.amesberger@amescon.com>"]
 license = "ISC"
 edition = "2021"
@@ -8,3 +8,7 @@ repository = "https://github.com/pilotnexus/pilot_sys.git"
 
 [dependencies]
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
+
+[dependencies.num-traits]
+version = "0.2"
+default-features = false

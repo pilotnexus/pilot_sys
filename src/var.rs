@@ -105,18 +105,22 @@ pub trait NumVar<T> {
 
 /// handles variable changes
 pub trait VarChange {
-    fn pos_flag(&self) -> bool;
-    fn neg_flag(&self) -> bool;
-    fn changed_flag(&self) -> bool;
+
+    type VarType;
+
+    fn get_value(&self) -> Self::VarType;
+    fn is_posedge(&self, value: Self::VarType) -> bool;
+    fn is_negedge(&self, value: Self::VarType) -> bool;
 
     /// returns a Future to await a positive value change
     /// That means in case of a boolean value a change from `false` to `true`, or
     /// in case of a numeric value a change to a higher value
-    fn pos(&self) -> WaitChange<'_, Self>
+    fn pos(&self) -> WaitChange<'_,Self, Self::VarType>
     where
         Self: Sized,
     {
         WaitChange {
+            snapshot: self.get_value(),
             var: self,
             event: Event::Pos,
         }
@@ -125,22 +129,24 @@ pub trait VarChange {
     /// returns a Future to await a negative value change
     /// That means in case of a boolean value a change from `true` to `false`, or
     /// in case of a numeric value a change to a lower value
-    fn neg(&self) -> WaitChange<'_, Self>
+    fn neg(&self) -> WaitChange<'_, Self, Self::VarType>
     where
         Self: Sized,
     {
         WaitChange {
+            snapshot: self.get_value(),
             var: self,
             event: Event::Neg,
         }
     }
 
     /// returns a Future to await a value change
-    fn changed(&self) -> WaitChange<'_, Self>
+    fn changed(&self) -> WaitChange<'_, Self, Self::VarType>
     where
         Self: Sized,
     {
         WaitChange {
+            snapshot: self.get_value(),
             var: self,
             event: Event::Changed,
         }
@@ -154,25 +160,26 @@ enum Event {
     Changed,
 }
 
-pub struct WaitChange<'a, V> {
+pub struct WaitChange<'a, V, T> {
+    snapshot: T,
     var: &'a V,
     event: Event,
 }
 
 
-impl<V> Future for WaitChange<'_, V>
-where
-    V: VarChange,
+impl<V, T: Copy> Future for WaitChange<'_, V, T>
+ where T: Copy,
+       V: VarChange<VarType = T>
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Self::Output> {
         crate::poll::poll_called();
-        let &Self { var, event } = self.into_ref().get_ref();
+        let &Self { snapshot, var, event } = self.into_ref().get_ref();
         let finished = match event {
-            Event::Pos => var.pos_flag(),
-            Event::Neg => var.neg_flag(),
-            Event::Changed => var.pos_flag() || var.neg_flag(),
+            Event::Pos => var.is_posedge(snapshot),
+            Event::Neg => var.is_negedge(snapshot),
+            Event::Changed => var.is_posedge(snapshot) || var.is_negedge(snapshot),
         };
         if finished {
             Poll::Ready(())
@@ -190,23 +197,24 @@ pub struct Var<T: Default> {
     forced: SyncCell<bool>,
     dirty: SyncCell<bool>,
     subscribed: SyncCell<SubscribeMode>,
-    pos: SyncCell<bool>,
-    neg: SyncCell<bool>,
 }
 
-impl<T: Default> VarChange for Var<T> {
-    fn pos_flag(&self) -> bool {
-        self.pos.get()
+impl VarChange for Var<bool> {
+    type VarType = bool;
+
+    fn get_value(&self) -> bool {
+        self.value.get()
     }
 
-    fn neg_flag(&self) -> bool {
-        self.neg.get()
+    fn is_posedge(&self, snapshot: bool) -> bool {
+        snapshot == false && self.value.get() == true 
     }
 
-    fn changed_flag(&self) -> bool {
-        self.pos.get() || self.neg.get()
+    fn is_negedge(&self, snapshot: bool) -> bool {
+        snapshot == true && self.value.get() == false 
     }
 }
+
 
 var_impl!(u64);
 var_impl!(i64);
@@ -231,8 +239,6 @@ impl Var<bool> {
             min_delta: SyncCell::new(true),
             subscribed: SyncCell::new(SubscribeMode::Off),
             dirty: SyncCell::new(false),
-            pos: SyncCell::new(false),
-            neg: SyncCell::new(false),
         }
     }
 
@@ -330,18 +336,9 @@ impl VarProps<bool> for Var<bool> {
     }
 
     fn set(&self, value: bool) {
-        if value == self.value.get() {
-            self.pos.set(false);
-            self.neg.set(false);
-        } else {
-            if value > self.value.get() {
-                self.pos.set(true);
-                self.neg.set(false);
-            } else {
-                self.pos.set(false);
-                self.neg.set(true);
-            }
+        if value != self.value.get() {
             self.value.set(value);
+
             match self.subscribed.get() {
               SubscribeMode::Sticky => {
                 if !self.dirty.get() && self.changed_value.get() != value {
@@ -349,13 +346,20 @@ impl VarProps<bool> for Var<bool> {
                     self.dirty.set(true);
                 }
               },
-              SubscribeMode::Current => self.changed_value.set(value),
+              SubscribeMode::Current => {
+                  if self.changed_value.get() != value {
+                    self.changed_value.set(value);
+                    self.dirty.set(true);
+                  }
+                },
               _ => ()
             }
         }
     }
 
     fn subscribe(&self, value: SubscribeMode) {
-      self.subscribed.set(value);
+      self.subscribed.set(value);   //set subscribed
+      self.changed_value.set(self.value.get()); // set the changed_value to send
+      self.dirty.set(true); //set dirty to signal inital value send
     }
 }
