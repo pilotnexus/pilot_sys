@@ -9,15 +9,15 @@ use core::{
 /// SubscribeMode defines the subscription status of a variable
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SubscribeMode {
-  /// Do not subscribe to value changes
-  Off,
-  /// Subscibe to value changes, the first change is stored and returned as soon as the change is read
-  /// Useful if you want to detect a fast change (e.g. change of a flag)
-  /// This also registers a zero-length pulse (setting the value to 1 and immediately to 0 again)
-  Sticky,
-  /// Subscribe to value changes, the latest change is returned (might skip fast changes)
-  /// Useful if you want to read the most current value even if they change faster than you can read them (e.g. analog inputs)
-  Current
+    /// Do not subscribe to value changes
+    Off,
+    /// Subscibe to value changes, the first change is stored and returned as soon as the change is read
+    /// Useful if you want to detect a fast change (e.g. change of a flag)
+    /// This also registers a zero-length pulse (setting the value to 1 and immediately to 0 again)
+    Sticky,
+    /// Subscribe to value changes, the latest change is returned (might skip fast changes)
+    /// Useful if you want to read the most current value even if they change faster than you can read them (e.g. analog inputs)
+    Current,
 }
 
 pub trait PilotBindings {
@@ -91,31 +91,31 @@ pub trait VarProps<T> {
 
 pub trait NumVar<T> {
     /// increments value by 1, safely wraps around
-    /// when overflow occurs 
-    fn inc (&self, add: T);
+    /// when overflow occurs
+    fn inc(&self, add: T);
     /// safely adds a value to the variable
     /// returns true if successful, if an overflow would occur false is returned and the value is not added
-    fn add (&self, add: T) -> bool;
+    fn add(&self, add: T) -> bool;
     /// safely substracts a value from the variable
     /// returns true if successful, if an overflow would occur false is returned and the value is not substracted
-    fn sub (&self, substract: T) -> bool;
+    fn sub(&self, substract: T) -> bool;
     /// sets minimum value to trigger a subscription change event
     fn delta(&self, delta: T);
 }
 
 /// handles variable changes
 pub trait VarChange {
-
     type VarType;
 
     fn get_value(&self) -> Self::VarType;
     fn is_posedge(&self, value: Self::VarType) -> bool;
     fn is_negedge(&self, value: Self::VarType) -> bool;
+    fn is_unread(&self) -> bool;
 
     /// returns a Future to await a positive value change
     /// That means in case of a boolean value a change from `false` to `true`, or
     /// in case of a numeric value a change to a higher value
-    fn pos(&self) -> WaitChange<'_,Self, Self::VarType>
+    fn pos(&self) -> WaitChange<'_, Self, Self::VarType>
     where
         Self: Sized,
     {
@@ -151,6 +151,18 @@ pub trait VarChange {
             event: Event::Changed,
         }
     }
+
+    /// returns a Future to await that a change is read by the host
+    fn host_read(&self) -> WaitChange<'_, Self, Self::VarType>
+    where
+        Self: Sized,
+    {
+        WaitChange {
+            snapshot: self.get_value(),
+            var: self,
+            event: Event::HostRead,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -158,6 +170,7 @@ enum Event {
     Pos,
     Neg,
     Changed,
+    HostRead,
 }
 
 pub struct WaitChange<'a, V, T> {
@@ -166,20 +179,25 @@ pub struct WaitChange<'a, V, T> {
     event: Event,
 }
 
-
 impl<V, T: Copy> Future for WaitChange<'_, V, T>
- where T: Copy,
-       V: VarChange<VarType = T>
+where
+    T: Copy,
+    V: VarChange<VarType = T>,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Self::Output> {
         crate::poll::poll_called();
-        let &Self { snapshot, var, event } = self.into_ref().get_ref();
+        let &Self {
+            snapshot,
+            var,
+            event,
+        } = self.into_ref().get_ref();
         let finished = match event {
             Event::Pos => var.is_posedge(snapshot),
             Event::Neg => var.is_negedge(snapshot),
             Event::Changed => var.is_posedge(snapshot) || var.is_negedge(snapshot),
+            Event::HostRead => !var.is_unread(),
         };
         if finished {
             Poll::Ready(())
@@ -207,14 +225,17 @@ impl VarChange for Var<bool> {
     }
 
     fn is_posedge(&self, snapshot: bool) -> bool {
-        snapshot == false && self.value.get() == true 
+        snapshot == false && self.value.get() == true
     }
 
     fn is_negedge(&self, snapshot: bool) -> bool {
-        snapshot == true && self.value.get() == false 
+        snapshot == true && self.value.get() == false
+    }
+
+    fn is_unread(&self) -> bool {
+        self.dirty.get()
     }
 }
-
 
 var_impl!(u64);
 var_impl!(i64);
@@ -255,22 +276,22 @@ impl crate::var::MemVar for crate::var::Var<bool> {
     unsafe fn to_buffer(&self, buffer: *mut u8, subvalue: u8) -> u8 {
         *(buffer as *mut u8) = match subvalue {
             0 => match self.get() {
-              true => 1,
-              false => 0,
+                true => 1,
+                false => 0,
             },
             1 => match self.value.get() {
-              true => 1,
-              false => 0,
+                true => 1,
+                false => 0,
             },
             2 => match self.changed_value.get() {
-              true => 1,
-              false => 0,
+                true => 1,
+                false => 0,
             },
             3 => match self.forced_value.get() {
-              true => 1,
-              false => 0,
+                true => 1,
+                false => 0,
             },
-            _ => 0
+            _ => 0,
         };
         1
     }
@@ -291,39 +312,39 @@ impl crate::var::MemVar for crate::var::Var<bool> {
     }
 
     unsafe fn clear_dirty(&self) {
-      self.dirty.set(false);
+        self.dirty.set(false);
     }
 
     unsafe fn get_forced(&self) -> u8 {
-      match self.forced.get() {
-        true => 1,
-        false => 0
-      }
+        match self.forced.get() {
+            true => 1,
+            false => 0,
+        }
     }
 
     unsafe fn set_forced(&self, value: u8) {
-      if value > 0 {
-        self.forced.set(true);
-      } else {
-        self.forced.set(false);
-  }
+        if value > 0 {
+            self.forced.set(true);
+        } else {
+            self.forced.set(false);
+        }
     }
 
     unsafe fn get_subscribed(&self) -> u8 {
-      match self.subscribed.get() {
-        SubscribeMode::Off => 0,
-        SubscribeMode::Sticky => 1,
-        SubscribeMode::Current => 2
-      }
+        match self.subscribed.get() {
+            SubscribeMode::Off => 0,
+            SubscribeMode::Sticky => 1,
+            SubscribeMode::Current => 2,
+        }
     }
 
     unsafe fn set_subscribed(&self, value: u8) {
-      match value {
-        0 => self.subscribed.set(SubscribeMode::Off),
-        1 => self.subscribed.set(SubscribeMode::Sticky),
-        2 => self.subscribed.set(SubscribeMode::Current),
-        _ => ()
-      }
+        match value {
+            0 => self.subscribed.set(SubscribeMode::Off),
+            1 => self.subscribed.set(SubscribeMode::Sticky),
+            2 => self.subscribed.set(SubscribeMode::Current),
+            _ => (),
+        }
     }
 }
 
@@ -340,26 +361,26 @@ impl VarProps<bool> for Var<bool> {
             self.value.set(value);
 
             match self.subscribed.get() {
-              SubscribeMode::Sticky => {
-                if !self.dirty.get() && self.changed_value.get() != value {
-                    self.changed_value.set(value);
-                    self.dirty.set(true);
+                SubscribeMode::Sticky => {
+                    if !self.dirty.get() && self.changed_value.get() != value {
+                        self.changed_value.set(value);
+                        self.dirty.set(true);
+                    }
                 }
-              },
-              SubscribeMode::Current => {
-                  if self.changed_value.get() != value {
-                    self.changed_value.set(value);
-                    self.dirty.set(true);
-                  }
-                },
-              _ => ()
+                SubscribeMode::Current => {
+                    if self.changed_value.get() != value {
+                        self.changed_value.set(value);
+                        self.dirty.set(true);
+                    }
+                }
+                _ => (),
             }
         }
     }
 
     fn subscribe(&self, value: SubscribeMode) {
-      self.subscribed.set(value);   //set subscribed
-      self.changed_value.set(self.value.get()); // set the changed_value to send
-      self.dirty.set(true); //set dirty to signal inital value send
+        self.subscribed.set(value); //set subscribed
+        self.changed_value.set(self.value.get()); // set the changed_value to send
+        self.dirty.set(true); //set dirty to signal inital value send
     }
 }

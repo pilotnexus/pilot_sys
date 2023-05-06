@@ -123,17 +123,21 @@ macro_rules! var_impl {
 
         impl VarChange for Var<$t> {
             type VarType = $t;
-        
+
             fn get_value(&self) -> $t {
                 self.value.get()
             }
-        
+
             fn is_posedge(&self, snapshot: $t) -> bool {
                 snapshot + self.min_delta.get() <= self.value.get()
             }
-        
+
             fn is_negedge(&self, snapshot: $t) -> bool {
                 snapshot - self.min_delta.get() >= self.value.get()
+            }
+
+            fn is_unread(&self) -> bool {
+                self.dirty.get()
             }
         }
 
